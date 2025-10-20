@@ -4,6 +4,38 @@ document.addEventListener("DOMContentLoaded", () => {
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
 
+  // Helper: escape HTML to avoid injection
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  // Helper: generate initials from an email or name-like string
+  function initialsFromIdentifier(id) {
+    const local = (id || "").split("@")[0];
+    const parts = local.split(/[\.\-_ ]/).filter(Boolean);
+    if (parts.length === 0) return (local[0] || "?").toUpperCase();
+    if (parts.length === 1) return (parts[0].slice(0, 2) || parts[0]).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  // Function to derive display name/email from participant entry
+  function participantDisplay(p) {
+    if (!p) return { display: "Unknown", id: "?" };
+    if (typeof p === "string") return { display: p, id: p };
+    // handle object like { name, email }
+    if (typeof p === "object") {
+      const display = p.name || p.email || JSON.stringify(p);
+      const id = p.email || p.name || display;
+      return { display, id };
+    }
+    return { display: String(p), id: String(p) };
+  }
+
   // Function to fetch activities from API
   async function fetchActivities() {
     try {
@@ -13,18 +45,39 @@ document.addEventListener("DOMContentLoaded", () => {
       // Clear loading message
       activitiesList.innerHTML = "";
 
+      // Reset select options (keep the placeholder)
+      activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
+
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
         const activityCard = document.createElement("div");
         activityCard.className = "activity-card";
 
-        const spotsLeft = details.max_participants - details.participants.length;
+        const participantsArr = Array.isArray(details.participants) ? details.participants : [];
+        const spotsLeft = (details.max_participants || 0) - participantsArr.length;
+
+        // Build participants section
+        let participantsHTML = "";
+        if (participantsArr.length > 0) {
+          participantsHTML = `<div class="participants"><h5>Participants</h5><ul>`;
+          participantsHTML += participantsArr
+            .map((p) => {
+              const { display, id } = participantDisplay(p);
+              const initials = initialsFromIdentifier(id);
+              return `<li><span class="avatar">${escapeHtml(initials)}</span><span class="name">${escapeHtml(display)}</span></li>`;
+            })
+            .join("");
+          participantsHTML += `</ul></div>`;
+        } else {
+          participantsHTML = `<div class="participants empty">No participants yet</div>`;
+        }
 
         activityCard.innerHTML = `
-          <h4>${name}</h4>
-          <p>${details.description}</p>
-          <p><strong>Schedule:</strong> ${details.schedule}</p>
+          <h4>${escapeHtml(name)}</h4>
+          <p>${escapeHtml(details.description || "")}</p>
+          <p><strong>Schedule:</strong> ${escapeHtml(details.schedule || "TBD")}</p>
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          ${participantsHTML}
         `;
 
         activitiesList.appendChild(activityCard);
@@ -62,6 +115,8 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        // Refresh activities to show updated participants
+        fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
